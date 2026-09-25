@@ -3,6 +3,22 @@ document.addEventListener("DOMContentLoaded", () => {
   const activitySelect = document.getElementById("activity");
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
+  const authButton = document.getElementById("auth-button");
+  const loginContainer = document.getElementById("login-container");
+  const loginForm = document.getElementById("login-form");
+  const signupContainer = document.getElementById("signup-container");
+  let accessToken = sessionStorage.getItem("teacherAccessToken");
+
+  function authHeaders() {
+    return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+  }
+
+  function updateAuthUi(isTeacher) {
+    signupContainer.classList.toggle("hidden", !isTeacher);
+    loginContainer.classList.add("hidden");
+    authButton.textContent = isTeacher ? "Log out" : "Teacher login";
+    fetchActivities();
+  }
 
   // Function to fetch activities from API
   async function fetchActivities() {
@@ -30,7 +46,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 ${details.participants
                   .map(
                     (email) =>
-                      `<li><span class="participant-email">${email}</span><button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button></li>`
+                      `<li><span class="participant-email">${email}</span>${
+                        accessToken
+                          ? `<button class="delete-btn" data-activity="${name}" data-email="${email}">Remove</button>`
+                          : ""
+                      }</li>`
                   )
                   .join("")}
               </ul>
@@ -80,6 +100,7 @@ document.addEventListener("DOMContentLoaded", () => {
         )}/unregister?email=${encodeURIComponent(email)}`,
         {
           method: "DELETE",
+          headers: authHeaders(),
         }
       );
 
@@ -124,6 +145,7 @@ document.addEventListener("DOMContentLoaded", () => {
         )}/signup?email=${encodeURIComponent(email)}`,
         {
           method: "POST",
+          headers: authHeaders(),
         }
       );
 
@@ -155,6 +177,72 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  authButton.addEventListener("click", () => {
+    if (accessToken) {
+      accessToken = null;
+      sessionStorage.removeItem("teacherAccessToken");
+      updateAuthUi(false);
+      messageDiv.textContent = "Logged out";
+      messageDiv.className = "info";
+      messageDiv.classList.remove("hidden");
+      return;
+    }
+    loginContainer.classList.toggle("hidden");
+  });
+
+  loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      const response = await fetch("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: document.getElementById("username").value,
+          password: document.getElementById("password").value,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        messageDiv.textContent = result.detail || "Login failed";
+        messageDiv.className = "error";
+        messageDiv.classList.remove("hidden");
+        return;
+      }
+      accessToken = result.access_token;
+      sessionStorage.setItem("teacherAccessToken", accessToken);
+      loginForm.reset();
+      updateAuthUi(true);
+      messageDiv.textContent = `Logged in as ${result.username}`;
+      messageDiv.className = "success";
+      messageDiv.classList.remove("hidden");
+    } catch (error) {
+      messageDiv.textContent = "Failed to log in. Please try again.";
+      messageDiv.className = "error";
+      messageDiv.classList.remove("hidden");
+      console.error("Error logging in:", error);
+    }
+  });
+
   // Initialize app
-  fetchActivities();
+  async function initializeAuth() {
+    if (!accessToken) {
+      updateAuthUi(false);
+      return;
+    }
+    try {
+      const response = await fetch("/auth/me", { headers: authHeaders() });
+      if (response.ok) {
+        updateAuthUi(true);
+      } else {
+        accessToken = null;
+        sessionStorage.removeItem("teacherAccessToken");
+        updateAuthUi(false);
+      }
+    } catch (error) {
+      updateAuthUi(false);
+      console.error("Error validating teacher session:", error);
+    }
+  }
+
+  initializeAuth();
 });
